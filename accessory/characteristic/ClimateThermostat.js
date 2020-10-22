@@ -1,161 +1,152 @@
 'use strict';
 
-const {getState} = require('../../util/Util');
 const {addNumericSensorCharacteristic, addNumericSensorActorCharacteristic} = require('./Numeric');
+const {addBinarySensorCharacteristicWithTransformation, addBinarySensorActorCharacteristicWithTransformation} = require('./Binary');
 
 const CLIMATE_THERMOSTAT_CONFIG = {
-    heatingItem: "heatingItem", //State mutual Exclusive with coolingItem, 'Switch' or 'Contact' type
-    coolingItem: "coolingItem", //State mutual Exclusive with heatingItem, 'Switch' or 'Contact' type
+    heatingItem: "heatingItem",
+    heatingItemInverted: "heatingItemInverted",
+    coolingItem: "coolingItem",
+    coolingItemInverted: "coolingItemInverted",
     modeItem: "modeItem",
+    modeItemCapability: "modeItemCapability"
 };
 
 function addCurrentHeatingCoolingStateCharacteristic(service) {
-    let [heatingItem] = this._getAndCheckItemType(CLIMATE_THERMOSTAT_CONFIG.heatingItem, ['Switch', 'Contact'], true);
-    let [coolingItem] = this._getAndCheckItemType(CLIMATE_THERMOSTAT_CONFIG.coolingItem, ['Switch', 'Contact'], true);
+    let [heatingItem] = this._getAndCheckItemType(CLIMATE_THERMOSTAT_CONFIG.heatingItem, ['Switch'], true);
+    let [coolingItem] = this._getAndCheckItemType(CLIMATE_THERMOSTAT_CONFIG.coolingItem, ['Switch'], true);
+    let [modeItem] = this._getAndCheckItemType(CLIMATE_THERMOSTAT_CONFIG.modeItem, ['Number'], true);
 
-    let mode;
-    if(!(heatingItem || coolingItem)) {
-        throw new Error(`heatingItem and/or coolingItem needs to be set: ${JSON.stringify(this._config)}`);
+    let OFF = 0;
+    let HEAT = 1;
+    let COOL = 2;
+    let AUTO = 3;
+
+    if(modeItem !== null) {
+        this._log.debug(`Creating 'CurrentHeatingCoolingState' characteristic for ${this.name} with ${modeItem}`);
+        let currentHeatingCoolingStateCharacteristic = service.getCharacteristic(this.Characteristic.CurrentHeatingCoolingState);
+        let modeItemCapability = this._config[CLIMATE_THERMOSTAT_CONFIG.modeItemCapability];
+        if(modeItemCapability !== undefined) {
+            switch(modeItemCapability) {
+                case "Heating":
+                    currentHeatingCoolingStateCharacteristic.setProps({
+                        validValues: [OFF,HEAT]
+                    });
+                    break;
+                case "Cooling":
+                    currentHeatingCoolingStateCharacteristic.setProps({
+                        validValues: [OFF,COOL]
+                    });
+                    break;
+                case "HeatingCooling":
+                    break;
+                default:
+                    throw new Error(`modeItemCapability has invalid value: ${modeItemCapability}`);
+            }
+        }
+        addNumericSensorCharacteristic.bind(this)(service, currentHeatingCoolingStateCharacteristic, {item: CLIMATE_THERMOSTAT_CONFIG.modeItem});
+    } else if(!(heatingItem || coolingItem)) {
+        throw new Error(`heatingItem or coolingItem need to be set, if modeItem is not present: ${JSON.stringify(this._config)}`);
     } else {
+        this._log.debug(`Creating 'CurrentHeatingCoolingState' characteristic for ${this.name} with heatingItem (${heatingItem})/coolingItem (${coolingItem})`);
+        let currentHeatingCoolingStateCharacteristic = service.getCharacteristic(this.Characteristic.CurrentHeatingCoolingState);
         if(heatingItem) {
-            mode = 'Heating';
-
-            this._subscribeCharacteristic(service.getCharacteristic(this.Characteristic.CurrentHeatingCoolingState),
-                heatingItem,
-                _transformHeatingCoolingState.bind(this,
-                    "heating",
-                    service.getCharacteristic(this.Characteristic.CurrentHeatingCoolingState),
-                )
-            );
+            this._log.debug(`Creating 'CurrentHeatingCoolingState' characteristic for ${this.name} with heatingItem (${heatingItem})`);
+            let inverted = this._checkInvertedConf(CLIMATE_THERMOSTAT_CONFIG.heatingItemInverted);
+            let transformation = {
+                "OFF": inverted ? HEAT : OFF,
+                "ON": inverted ? OFF : HEAT
+            };
+            addBinarySensorCharacteristicWithTransformation.bind(this)(service, currentHeatingCoolingStateCharacteristic, {item: CLIMATE_THERMOSTAT_CONFIG.heatingItem, inverted: CLIMATE_THERMOSTAT_CONFIG.heatingItemInverted}, transformation);
+            currentHeatingCoolingStateCharacteristic.setProps({
+                validValues: [OFF,HEAT]
+            });
+        } else if (coolingItem) {
+            this._log.debug(`Creating 'CurrentHeatingCoolingState' characteristic for ${this.name} with coolingItem (${coolingItem})`);
+            let inverted = this._checkInvertedConf(CLIMATE_THERMOSTAT_CONFIG.coolingItemInverted);
+            let transformation = {
+                "OFF": inverted ? COOL : OFF,
+                "ON": inverted ? OFF : COOL
+            };
+            addBinarySensorCharacteristicWithTransformation.bind(this)(service, currentHeatingCoolingStateCharacteristic, {
+                item: CLIMATE_THERMOSTAT_CONFIG.coolingItem,
+                inverted: CLIMATE_THERMOSTAT_CONFIG.coolingItemInverted
+            }, transformation);
+            currentHeatingCoolingStateCharacteristic.setProps({
+                validValues: [OFF, COOL]
+            });
         }
-        if(coolingItem) {
-            mode = mode === 'Heating' ? 'HeatingCooling' : 'Cooling'; // If heating device was present this means we have Heating Cooling
-
-            this._subscribeCharacteristic(service.getCharacteristic(this.Characteristic.CurrentHeatingCoolingState),
-                coolingItem,
-                _transformHeatingCoolingState.bind(this,
-                    "cooling",
-                    service.getCharacteristic(this.Characteristic.CurrentHeatingCoolingState),
-                )
-            );
-        }
-
-        this._log.debug(`Creating 'CurrentHeatingCoolingState' characteristic for ${this.name} with mode set to ${mode}`);
-        service.getCharacteristic(this.Characteristic.CurrentHeatingCoolingState)
-            .on('get', _getHeatingCoolingState.bind(this, mode, heatingItem, coolingItem));
     }
 }
 
 function addTargetHeatingCoolingStateCharacteristic(service) {
-    let modeItem = this._config[CLIMATE_THERMOSTAT_CONFIG.modeItem];
-    if (modeItem !== undefined) {
-        this._log.debug(`Creating 'TargetHeatingCoolingState' characteristic for ${this.name} with ${modeItem}`);
-        addNumericSensorActorCharacteristic.bind(this)(service, service.getCharacteristic(this.Characteristic.TargetHeatingCoolingState), {item: CLIMATE_THERMOSTAT_CONFIG.modeItem});
-    } else {
-        let mode;
-        let HEAT = 1;
-        let COOL = 2;
-        let AUTO = 3;
+    let [heatingItem] = this._getAndCheckItemType(CLIMATE_THERMOSTAT_CONFIG.heatingItem, ['Switch'], true);
+    let [coolingItem] = this._getAndCheckItemType(CLIMATE_THERMOSTAT_CONFIG.coolingItem, ['Switch'], true);
+    let [modeItem] = this._getAndCheckItemType(CLIMATE_THERMOSTAT_CONFIG.modeItem, ['Number'], true);
 
-        if (this._config[CLIMATE_THERMOSTAT_CONFIG.coolingItem] && this._config[CLIMATE_THERMOSTAT_CONFIG.heatingItem]) {
-            mode = AUTO;
-        } else if (this._config[CLIMATE_THERMOSTAT_CONFIG.coolingItem]) {
-            mode = COOL;
-        } else if (this._config[CLIMATE_THERMOSTAT_CONFIG.heatingItem]) {
-            mode = HEAT;
-        } else {
-            throw new Error(`Unable to set 'TargetHeatingCoolingState' mode, because neither heating nor cooling item is defined!`);
-        }
-
-        this._log.debug(`Creating 'TargetHeatingCoolingState' characteristic for ${this.name} with mode set to ${mode}`);
-        service.getCharacteristic(this.Characteristic.TargetHeatingCoolingState)
-            .on('get', function (callback) {
-                callback(null, mode);
-            })
-            .on('set', function(_, callback) { callback() }.bind(this));
-
-    }
-}
-
-function _transformHeatingCoolingState(thisItemMode, characteristic, value) {
     let OFF = 0;
     let HEAT = 1;
     let COOL = 2;
+    let AUTO = 3;
 
-    let currentState = characteristic.value;
-
-    if(thisItemMode === "heating") {
-        if(value === "ON" || value === "OPEN") {
-            return HEAT;
-        } else if(value === "OFF" || value === "CLOSED") {
-            if(currentState === COOL) {
-                return COOL;
-            } else {
-                return OFF;
+    if (modeItem !== null) {
+        this._log.debug(`Creating 'TargetHeatingCoolingState' characteristic for ${this.name} with ${modeItem}`);
+        let targetHeatingCoolingStateCharacteristic = service.getCharacteristic(this.Characteristic.TargetHeatingCoolingState);
+        let modeItemCapability = this._config[CLIMATE_THERMOSTAT_CONFIG.modeItemCapability];
+        if(modeItemCapability !== undefined) {
+            switch(modeItemCapability) {
+                case "Heating":
+                    targetHeatingCoolingStateCharacteristic.setProps({
+                        validValues: [OFF,HEAT,AUTO]
+                    });
+                    break;
+                case "Cooling":
+                    targetHeatingCoolingStateCharacteristic.setProps({
+                        validValues: [OFF,COOL,AUTO]
+                    });
+                    break;
+                case "HeatingCooling":
+                    break;
+                default:
+                    throw new Error(`modeItemCapability has invalid value: ${modeItemCapability}`);
             }
         }
-    } else if(thisItemMode === "cooling") {
-        if(value === "ON" || value === "OPEN") {
-            return COOL;
-        } else if(value === "OFF" || value === "CLOSED") {
-            if(currentState === HEAT) {
-                return HEAT;
-            } else {
-                return OFF;
-            }
+        addNumericSensorActorCharacteristic.bind(this)(service, targetHeatingCoolingStateCharacteristic, {item: CLIMATE_THERMOSTAT_CONFIG.modeItem});
+    } else if(!(heatingItem || coolingItem)) {
+        throw new Error(`heatingItem and/or coolingItem needs to be set: ${JSON.stringify(this._config)}`);
+    } else {
+        let targetHeatingCoolingStateCharacteristic = service.getCharacteristic(this.Characteristic.TargetHeatingCoolingState);
+        if(heatingItem) {
+            this._log.debug(`Creating 'TargetHeatingCoolingState' characteristic for ${this.name} with heatingItem (${heatingItem})`);
+            let inverted = this._checkInvertedConf(CLIMATE_THERMOSTAT_CONFIG.heatingItemInverted);
+            let transformation = {
+                "OFF": inverted ? HEAT : AUTO,
+                "ON": inverted ? AUTO : HEAT,
+                [inverted ? AUTO : HEAT]: "ON",
+                [inverted ? HEAT : AUTO]: "OFF"
+            };
+
+            addBinarySensorActorCharacteristicWithTransformation.bind(this)(service, targetHeatingCoolingStateCharacteristic, {item: CLIMATE_THERMOSTAT_CONFIG.heatingItem, inverted: CLIMATE_THERMOSTAT_CONFIG.heatingItemInverted}, transformation);
+            targetHeatingCoolingStateCharacteristic.setProps({
+                validValues: [HEAT,AUTO]
+            });
+        } else if (coolingItem) {
+            this._log.debug(`Creating 'CurrentHeatingCoolingState' characteristic for ${this.name} with coolingItem (${coolingItem})`);
+            let inverted = this._checkInvertedConf(CLIMATE_THERMOSTAT_CONFIG.coolingItemInverted);
+            let transformation = {
+                "OFF": inverted ? COOL : AUTO,
+                "ON": inverted ? AUTO : COOL,
+                [inverted ? AUTO : COOL]: "ON",
+                [inverted ? COOL : AUTO]: "OFF"
+            };
+            addBinarySensorActorCharacteristicWithTransformation.bind(this)(service, targetHeatingCoolingStateCharacteristic, {
+                item: CLIMATE_THERMOSTAT_CONFIG.coolingItem,
+                inverted: CLIMATE_THERMOSTAT_CONFIG.coolingItemInverted
+            }, transformation);
+            targetHeatingCoolingStateCharacteristic.setProps({
+                validValues: [COOL,AUTO]
+            });
         }
-    }
-}
-
-function _getHeatingCoolingState(mode, heatingItem, coolingItem, callback) {
-    let OFF = 0;  // = Characteristic.CurrentHeatingCoolingState.OFF
-    let HEAT = 1; // = Characteristic.CurrentHeatingCoolingState.HEAT
-    let COOL = 2; // = Characteristic.CurrentHeatingCoolingState.COOL
-
-    switch (mode) {
-        case "Heating":
-            getState.bind(this)(heatingItem, {
-                "ON": HEAT,
-                "OFF": OFF,
-                "OPEN": HEAT,
-                "CLOSED": OFF
-            }, callback);
-            break;
-        case "Cooling":
-            getState.bind(this, coolingItem, {
-                "ON": COOL,
-                "OFF": OFF,
-                "OPEN": COOL,
-                "CLOSED": OFF
-            }, callback);
-            break;
-        case "HeatingCooling":
-            this._log.debug(`Getting heating/cooling state for ${this.name} [${heatingItem} & ${coolingItem}]`);
-            let coolingState = this._openHAB.getStateSync(coolingItem);
-            let heatingState = this._openHAB.getStateSync(heatingItem);
-            if (coolingState instanceof Error) {
-                callback(coolingState);
-            }
-            if (heatingState instanceof Error) {
-                callback(heatingState);
-            }
-
-            if ((heatingState === "OFF" || heatingState === "CLOSED") && (coolingState === "OFF" || coolingState === "CLOSED")) {
-                callback(null, OFF);
-            } else if ((heatingState === "ON" || heatingState === "OPEN") && (coolingState === "OFF" || coolingState === "CLOSED")) {
-                callback(null, HEAT);
-            } else if ((heatingState === "OFF" || heatingState === "CLOSED") && (coolingState === "ON" || coolingState === "OPEN")) {
-                callback(null, COOL);
-            } else {
-                let msg = `Combination of heating state (${heatingState}) and cooling state (${coolingState}) not allowed!`;
-                this._log.error(msg);
-                callback(new Error(msg));
-            }
-            break;
-        default:
-            let msg = `Unable to get HeatingCooling state for mode ${this._mode}`;
-            this._log.error(msg);
-            callback(new Error(msg));
     }
 }
 

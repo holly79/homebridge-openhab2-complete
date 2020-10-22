@@ -1,9 +1,36 @@
 # Changelog of homebridge-openhab2-complete
 ## Roadmap
-### V1.2.0 (planned)
+### V1.3.0 (planned)
 * Code audit & documentation
+* Homebridge verification, including:
+  * Handling all thrown exceptions
+  * Supporting GUI configuration
 
 ## Changelog
+### V1.2.0
+* Extended `NumericSensor` and `NumericSensorActor` capabilities to support `Rollershutter` and `Dimmer` types.
+* Homebridge no longer crashes if openHAB's host is not available
+* Support for scientifically notated numbers (e.g. `7E+1`)
+* Fixed wrong heater/cooler state
+* Enabling support for user-defined min/max values:
+  * minTemp, maxTemp, minTempStep for Thermostat, HeaterCooler and Temperature Sensor
+  * minFanSpeed, maxFanSpeed, minFanStep for HeaterCooler, AirPurifier and Humidifier/Dehumidifier
+* Fixed documentation issue around `activeItem` and `activeItemInverted` for Air Purifier, Irrigation System, Humidifier/Dehumidifier.
+* Fixed missing `LEVEL_CONFIG` for Filter Maintenance Sensor, CO Sensor and CO2 Sensor
+* Reworked thermostat and added warning for Heater/Cooler, see README
+* Added `durationItemMax` to the Valve Service
+* Adding TV Service
+
+Issues:
+* Closes #60
+* Closes #70
+* Closes #73
+* Closes #74
+* Closes #79
+* Closes #80
+* Closes #82
+* Closes #83
+* Closes #84
 
 ### V1.1.0
 * Updated Readme to fix typo's

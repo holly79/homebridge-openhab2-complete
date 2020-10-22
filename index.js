@@ -1,5 +1,5 @@
 const fs = require('fs');
-const sleep = require('sleep');
+const {sleep} = require('./util/Util');
 
 const version = require('./package').version;
 const platformName = require('./package').name;
@@ -75,15 +75,15 @@ const OpenHABComplete = class {
         this._log.info(`Waiting for openHAB host (${config.host}) to come online...`);
         let online = false;
         while(!online) {
-            sleep.sleep(2);
+            sleep(2);
             this._log.debug(`Checking if openHAB host (${config.host}) is online...`);
             online = this._platform.openHAB.isOnline();
         }
-        sleep.sleep(10);
+        sleep(10);
         this._log.info(`openHAB host (${config.host}) is online, now syncing...`);
         this._platform.openHAB.syncItemTypes();
 
-        this._log.info(`'OpenHAB2 - Complete Edition' plugin loaded - Version ${version}`);
+        this._log.info(`'OpenHAB2 - Complete Edition' plugin loaded - Version ${version} - dev`);
         this._log.info(`---`);
     }
 
@@ -103,6 +103,9 @@ const OpenHABComplete = class {
         }.bind(this));
         this._platform.openHAB.startSubscription();
         this._platform.openHAB.syncItemValues();
+        for(let val of _accessories) {
+            this._platform.api.registerPlatformAccessories(platformName, platformPrettyName, val.getAccessory());
+        }
         this._log.info(`Finished loading ${_accessories.length} accessories from configuration`);
         this._log.info(`---`);
         callback(_accessories);
